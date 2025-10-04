@@ -1,0 +1,8 @@
+uvicorn
+modal-client
+python-multipart
+Pillow
+surya
+docling
+layoutparser
+fastapi

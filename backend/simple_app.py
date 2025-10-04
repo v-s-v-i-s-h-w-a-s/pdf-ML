@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Any
 import io
 import time
+import base64
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTTextContainer, LTFigure, LTImage
 try:
@@ -117,6 +118,35 @@ async def extract_pdf(model_id: str, file: UploadFile = File(...), download: boo
                         })
 
         if markdown_parts:
+            # If there are figure elements, try to render and embed them as base64 images
+            try:
+                fig_elements = [el for el in elements if el.get('type') in ('figure', 'image')]
+                if fig_elements:
+                    pages_imgs = convert_from_bytes(file_bytes, dpi=200)
+                    for el in fig_elements:
+                        p = el.get('page', 1)
+                        if p <= 0 or p > len(pages_imgs):
+                            continue
+                        img = pages_imgs[p-1]
+                        w, h = img.size
+                        bbox = el.get('bbox', [0,0,1000,1000])
+                        x0 = max(0, int(bbox[0] * w / 1000))
+                        y0 = max(0, int(bbox[1] * h / 1000))
+                        x1 = min(w, int(bbox[2] * w / 1000))
+                        y1 = min(h, int(bbox[3] * h / 1000))
+                        if x1 <= x0 or y1 <= y0:
+                            continue
+                        try:
+                            crop = img.crop((x0, y0, x1, y1))
+                            buf = io.BytesIO()
+                            crop.save(buf, format='PNG')
+                            data = base64.b64encode(buf.getvalue()).decode('ascii')
+                            el['image'] = f"data:image/png;base64,{data}"
+                        except Exception:
+                            continue
+            except Exception:
+                # ignore image extraction failures
+                pass
             # Build cleaner Markdown from structured elements (grouped by page)
             time_s = 0.05
             yaml_meta = f"---\nfilename: '{file.filename}'\nmodel: '{model_id}'\ntime_s: {time_s}\nelements: {len(elements)}\nword_count: {total_words}\n---\n\n"
@@ -131,6 +161,15 @@ async def extract_pdf(model_id: str, file: UploadFile = File(...), download: boo
                 md_parts.append(f"## Page {p}\n\n")
                 items = sorted(by_page[p], key=lambda e: (e['bbox'][1], e['bbox'][0]))
                 for el in items:
+                    # If an image was extracted for this element, embed it inline in the Markdown.
+                    if el.get('image'):
+                        caption = el.get('text', f"Figure on page {p}").strip() or f"Figure on page {p}"
+                        md_parts.append(f"![{caption}]({el['image']})\n\n")
+                        # Optionally include the caption as a paragraph if it wasn't just the placeholder
+                        if caption and caption.lower().find('figure') == -1:
+                            md_parts.append(caption + "\n\n")
+                        continue
+
                     text = el.get('text', '').strip()
                     if not text:
                         continue
@@ -209,14 +248,31 @@ async def extract_pdf(model_id: str, file: UploadFile = File(...), download: boo
                         y_max_norm = int(1000 * y_max / img_h)
                         bbox = [x_min_norm, y_min_norm, x_max_norm, y_max_norm]
                         conf_avg = (sum(info['confs']) / len(info['confs'])) if info['confs'] else 70.0
-
-                        ocr_elements.append({
+                        # Build element dict and attempt to crop the paragraph region from the page image
+                        el = {
                             'type': 'paragraph',
                             'text': paragraph_text,
                             'page': page_no,
                             'bbox': bbox,
                             'confidence': round(conf_avg / 100.0, 2),
-                        })
+                        }
+                        try:
+                            # Pixel coordinates for cropping
+                            x0px = max(0, int(x_min))
+                            y0px = max(0, int(y_min))
+                            x1px = min(img_w, int(x_max))
+                            y1px = min(img_h, int(y_max))
+                            if x1px > x0px and y1px > y0px:
+                                crop = img.crop((x0px, y0px, x1px, y1px))
+                                buf = io.BytesIO()
+                                crop.save(buf, format='PNG')
+                                data = base64.b64encode(buf.getvalue()).decode('ascii')
+                                el['image'] = f"data:image/png;base64,{data}"
+                        except Exception:
+                            # Non-fatal: if cropping fails, continue without an image
+                            pass
+
+                        ocr_elements.append(el)
                         ocr_text_parts.append(paragraph_text + "\n\n")
 
                 if ocr_text_parts:
@@ -226,6 +282,14 @@ async def extract_pdf(model_id: str, file: UploadFile = File(...), download: boo
 
                     md_parts = []
                     for el in ocr_elements:
+                        # If an image is attached to this OCR element, embed it first
+                        if el.get('image'):
+                            caption = el.get('text', f"Figure on page {el.get('page', '?')}").strip() or f"Figure on page {el.get('page', '?')}"
+                            md_parts.append(f"![{caption}]({el['image']})\n\n")
+                            if caption and caption.lower().find('figure') == -1:
+                                md_parts.append(caption + "\n\n")
+                            continue
+
                         # Heuristic: short top elements -> title
                         if len(el['text']) < 60 and el['bbox'][1] < 150:
                             md_parts.append('# ' + el['text'] + '\n\n')

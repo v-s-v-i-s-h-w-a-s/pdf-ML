@@ -1,7 +1,10 @@
 fastapi
 uvicorn
+modal
 python-multipart
 Pillow
+surya-ocr
+layoutparser[ocr]
 pdfminer.six
-pytesseract
-pdf2image
+torch
+torchvision
