@@ -12,6 +12,8 @@ import time
 import base64
 from pdfminer.high_level import extract_pages
 from pdfminer.layout import LTTextContainer, LTFigure, LTImage
+import zipfile
+import uuid
 try:
     import pytesseract
     from pytesseract import Output as PTOutput
@@ -123,7 +125,7 @@ async def extract_pdf(model_id: str, file: UploadFile = File(...), download: boo
                 fig_elements = [el for el in elements if el.get('type') in ('figure', 'image')]
                 if fig_elements:
                     pages_imgs = convert_from_bytes(file_bytes, dpi=200)
-                    for el in fig_elements:
+                    for idx, el in enumerate(fig_elements):
                         p = el.get('page', 1)
                         if p <= 0 or p > len(pages_imgs):
                             continue
@@ -140,8 +142,13 @@ async def extract_pdf(model_id: str, file: UploadFile = File(...), download: boo
                             crop = img.crop((x0, y0, x1, y1))
                             buf = io.BytesIO()
                             crop.save(buf, format='PNG')
-                            data = base64.b64encode(buf.getvalue()).decode('ascii')
-                            el['image'] = f"data:image/png;base64,{data}"
+                            img_bytes = buf.getvalue()
+                            # keep a small in-memory copy for packaging into zip later
+                            fname = f"figure_p{p}_{idx}_{uuid.uuid4().hex[:8]}.png"
+                            el['image_bytes'] = img_bytes
+                            el['image_filename'] = fname
+                            # keep a data-uri for API clients that expect it
+                            el['image'] = f"data:image/png;base64,{base64.b64encode(img_bytes).decode('ascii')}"
                         except Exception:
                             continue
             except Exception:
@@ -186,10 +193,25 @@ async def extract_pdf(model_id: str, file: UploadFile = File(...), download: boo
             markdown = yaml_meta + ''.join(md_parts).rstrip() + '\n'
             metrics = {"time_s": time_s, "elements_count": len(elements), "word_count": total_words}
             if download:
+                # If images were captured as bytes, package markdown + images into a zip
+                imgs = [el for el in elements if el.get('image_bytes')]
                 safe_name = (file.filename or model_id).replace(' ', '_')
-                md_bytes = markdown.encode('utf-8')
-                headers = {"Content-Disposition": f'attachment; filename="{safe_name}.md"'}
-                return StreamingResponse(io.BytesIO(md_bytes), media_type='text/markdown', headers=headers)
+                if imgs:
+                    zip_buf = io.BytesIO()
+                    with zipfile.ZipFile(zip_buf, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+                        # add markdown
+                        zf.writestr('extracted.md', markdown)
+                        # add images under images/
+                        for el in imgs:
+                            fname = el.get('image_filename') or f"image_{uuid.uuid4().hex[:8]}.png"
+                            zf.writestr(f'images/{fname}', el.get('image_bytes'))
+                    zip_buf.seek(0)
+                    headers = {"Content-Disposition": f'attachment; filename="{safe_name}.zip"'}
+                    return StreamingResponse(zip_buf, media_type='application/zip', headers=headers)
+                else:
+                    md_bytes = markdown.encode('utf-8')
+                    headers = {"Content-Disposition": f'attachment; filename="{safe_name}.md"'}
+                    return StreamingResponse(io.BytesIO(md_bytes), media_type='text/markdown', headers=headers)
             return {"markdown_output": markdown, "elements": elements, "metrics": metrics}
         # If no text extracted and OCR is available, run OCR fallback with detailed boxes
         if not markdown_parts and OCR_AVAILABLE:
@@ -283,9 +305,10 @@ async def extract_pdf(model_id: str, file: UploadFile = File(...), download: boo
                     md_parts = []
                     for el in ocr_elements:
                         # If an image is attached to this OCR element, embed it first
-                        if el.get('image'):
+                        if el.get('image_filename'):
                             caption = el.get('text', f"Figure on page {el.get('page', '?')}").strip() or f"Figure on page {el.get('page', '?')}"
-                            md_parts.append(f"![{caption}]({el['image']})\n\n")
+                            # reference the image by filename (images/...) — a ZIP download will include these files
+                            md_parts.append(f"![{caption}](images/{el['image_filename']})\n\n")
                             if caption and caption.lower().find('figure') == -1:
                                 md_parts.append(caption + "\n\n")
                             continue
@@ -300,9 +323,21 @@ async def extract_pdf(model_id: str, file: UploadFile = File(...), download: boo
                     metrics = {"time_s": time_s, "elements_count": len(ocr_elements), "word_count": total_words_ocr}
                     if download:
                         safe_name = (file.filename or model_id).replace(' ', '_')
-                        md_bytes = markdown.encode('utf-8')
-                        headers = {"Content-Disposition": f'attachment; filename="{safe_name}_ocr.md"'}
-                        return StreamingResponse(io.BytesIO(md_bytes), media_type='text/markdown', headers=headers)
+                        imgs = [el for el in ocr_elements if el.get('image_bytes')]
+                        if imgs:
+                            zip_buf = io.BytesIO()
+                            with zipfile.ZipFile(zip_buf, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
+                                zf.writestr('extracted.md', markdown)
+                                for el in imgs:
+                                    fname = el.get('image_filename') or f"image_{uuid.uuid4().hex[:8]}.png"
+                                    zf.writestr(f'images/{fname}', el.get('image_bytes'))
+                            zip_buf.seek(0)
+                            headers = {"Content-Disposition": f'attachment; filename="{safe_name}_ocr.zip"'}
+                            return StreamingResponse(zip_buf, media_type='application/zip', headers=headers)
+                        else:
+                            md_bytes = markdown.encode('utf-8')
+                            headers = {"Content-Disposition": f'attachment; filename="{safe_name}_ocr.md"'}
+                            return StreamingResponse(io.BytesIO(md_bytes), media_type='text/markdown', headers=headers)
                     return {"markdown_output": markdown, "elements": ocr_elements, "metrics": metrics}
             except Exception as e:
                 print(f"OCR fallback error: {e}")

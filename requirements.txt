@@ -1,3 +1,5 @@
+# This file points to the dev requirements used for local development of the backend
+-r backend/requirements-dev.txt
 uvicorn
 modal-client
 python-multipart
