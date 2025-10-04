@@ -1,0 +1,13 @@
+# Normalize text files and mark common binaries
+* text=auto
+
+# Mark common binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+
+# Keep CRLF for Windows PowerShell scripts
+*.ps1 text eol=crlf
