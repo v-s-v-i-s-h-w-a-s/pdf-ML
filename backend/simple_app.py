@@ -57,3 +57,21 @@ async def extract_pdf(model_id: str, file: UploadFile = File(...)):
     metrics = {"time_s": 0.01, "elements_count": len(elements), "word_count": 20}
 
     return {"markdown_output": markdown, "elements": elements, "metrics": metrics}
+
+
+@app.post("/annotate/{model_id}")
+async def annotate_image(model_id: str, elements: List[Dict] = None):
+    """Return a PNG image (bytes) with bounding boxes drawn for provided elements.
+    This endpoint is for local dev UI testing and expects 'elements' as JSON body.
+    """
+    from fastapi.responses import Response
+    from .annotate import draw_annotations
+
+    if elements is None:
+        return Response(content=b"", media_type="image/png", status_code=400)
+
+    try:
+        png_bytes = draw_annotations(elements)
+        return Response(content=png_bytes, media_type="image/png")
+    except Exception as e:
+        return Response(content=b"", media_type="image/png", status_code=500)
