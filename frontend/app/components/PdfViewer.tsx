@@ -40,7 +40,7 @@ export const PdfViewer = ({ file, elements, currentPage, onPageChange }: PdfView
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [renderText, setRenderText] = useState<boolean>(false); // disabled by default for speed
   const [showFallback, setShowFallback] = useState<boolean>(false);
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  // debugLogs removed (was unused) to satisfy linting; use console.* for ad-hoc debugging
 
   // Create object URL from file
   useEffect(() => {
@@ -48,7 +48,6 @@ export const PdfViewer = ({ file, elements, currentPage, onPageChange }: PdfView
       const url = URL.createObjectURL(file);
       setFileUrl(url);
       console.log('[PdfViewer] created object URL', url);
-      setDebugLogs((d) => [...d, `[PdfViewer] created object URL ${url}`]);
       
       // Cleanup URL when component unmounts or file changes
       return () => {
@@ -63,7 +62,6 @@ export const PdfViewer = ({ file, elements, currentPage, onPageChange }: PdfView
     onPageChange(1);
     setLoadProgress(null);
     console.log('[PdfViewer] document loaded, pages=', numPages);
-    setDebugLogs((d) => [...d, `[PdfViewer] document loaded, pages=${numPages}`]);
     setShowFallback(false);
   }
   function onDocumentLoadError(error: Error) {
@@ -87,12 +85,11 @@ export const PdfViewer = ({ file, elements, currentPage, onPageChange }: PdfView
   function onDocumentLoadProgress(progress: { loaded?: number; total?: number }) {
     try {
       if (!progress) return;
-      const { loaded, total } = progress as any;
+      const { loaded, total } = progress;
       if (loaded && total) {
         const pct = Math.min(100, Math.round((loaded / total) * 100));
         setLoadProgress(pct);
         console.log('[PdfViewer] load progress', pct);
-        setDebugLogs((d) => [...d, `[PdfViewer] load progress ${pct}`]);
       }
     } catch (e) {
       console.warn('[PdfViewer] progress handler error', e);
@@ -106,7 +103,6 @@ export const PdfViewer = ({ file, elements, currentPage, onPageChange }: PdfView
     const timeout = setTimeout(() => {
       if (!numPages && !loadProgress) {
         console.warn('[PdfViewer] pdf.js did not start loading in time; showing iframe fallback');
-        setDebugLogs((d) => [...d, '[PdfViewer] fallback triggered']);
         setShowFallback(true);
       }
     }, 5000);

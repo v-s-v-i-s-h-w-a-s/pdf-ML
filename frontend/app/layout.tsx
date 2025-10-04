@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import 'react-pdf/dist/Page/AnnotationLayer.css';
-import 'react-pdf/dist/Page/TextLayer.css';
+// NOTE: Do NOT import react-pdf CSS on the server. These imports break the
+// Next.js server-side build and must be loaded only on the client. The
+// PdfViewer component runs client-side (ssr: false) and will rely on local
+// worker assets instead.
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
