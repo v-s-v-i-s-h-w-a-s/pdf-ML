@@ -35,8 +35,10 @@ interface PdfViewerProps {
 export const PdfViewer = ({ file, elements, currentPage, onPageChange }: PdfViewerProps) => {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageWidth, setPageWidth] = useState<number>(0);
+  const [loadProgress, setLoadProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
+  const [renderText, setRenderText] = useState<boolean>(false); // disabled by default for speed
 
   // Create object URL from file
   useEffect(() => {
@@ -55,8 +57,8 @@ export const PdfViewer = ({ file, elements, currentPage, onPageChange }: PdfView
     setNumPages(numPages);
     setError(null);
     onPageChange(1);
+    setLoadProgress(null);
   }
-
   function onDocumentLoadError(error: Error) {
     console.error('PDF load error:', error);
     console.error('File type:', file?.type);
@@ -73,6 +75,19 @@ export const PdfViewer = ({ file, elements, currentPage, onPageChange }: PdfView
     }
     
     setError(errorMessage);
+  }
+
+  function onDocumentLoadProgress(progress: { loaded?: number; total?: number }) {
+    try {
+      if (!progress) return;
+      const { loaded, total } = progress as any;
+      if (loaded && total) {
+        const pct = Math.min(100, Math.round((loaded / total) * 100));
+        setLoadProgress(pct);
+      }
+    } catch (e) {
+      // ignore progress errors
+    }
   }
 
   const handleResize = useCallback((width: number) => {
@@ -104,6 +119,7 @@ export const PdfViewer = ({ file, elements, currentPage, onPageChange }: PdfView
           file={fileUrl}
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={onDocumentLoadError}
+          onLoadProgress={onDocumentLoadProgress}
           loading={
             <div className="flex items-center justify-center h-full">
               <p className="text-gray-600 dark:text-gray-300">Loading PDF...</p>
@@ -115,8 +131,9 @@ export const PdfViewer = ({ file, elements, currentPage, onPageChange }: PdfView
           {numPages && (
             <Page 
               pageNumber={currentPage} 
-              renderAnnotationLayer={true} 
-              renderTextLayer={true} 
+              // Disable the annotation/text layers by default (they are expensive).
+              renderAnnotationLayer={renderText} 
+              renderTextLayer={renderText} 
               width={pageWidth > 0 ? pageWidth : undefined}
             />
           )}
@@ -148,6 +165,21 @@ export const PdfViewer = ({ file, elements, currentPage, onPageChange }: PdfView
         </div>
       </Document>
       )}
+
+      {/* Loading progress */}
+      {loadProgress !== null && (
+        <div className="absolute top-4 right-4 bg-white/80 dark:bg-gray-800/80 p-2 rounded shadow">
+          <div className="text-sm">Loading: {loadProgress}%</div>
+        </div>
+      )}
+
+      {/* Toggle to enable text/annotation layers when needed */}
+      <div className="absolute top-4 left-4">
+        <label className="inline-flex items-center space-x-2 bg-white/80 dark:bg-gray-800/80 p-2 rounded">
+          <input type="checkbox" checked={renderText} onChange={(e) => setRenderText(e.target.checked)} />
+          <span className="text-sm">Render text/annotations (slower)</span>
+        </label>
+      </div>
       
       {/* Page Navigation Controls */}
       {numPages && (
