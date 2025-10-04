@@ -247,3 +247,25 @@ async def annotate_image(model_id: str, elements: List[Dict] = None):
         return Response(content=png_bytes, media_type="image/png")
     except Exception as e:
         return Response(content=b"", media_type="image/png", status_code=500)
+
+
+@app.post('/render/page/{page_num}')
+async def render_page_image(page_num: int, file: UploadFile = File(...)):
+    """Render a single PDF page to PNG and return it. page_num is 1-based."""
+    if file.content_type != 'application/pdf':
+        raise HTTPException(status_code=400, detail='Only PDF files are supported.')
+
+    file_bytes = await file.read()
+    try:
+        images = convert_from_bytes(file_bytes, dpi=150)
+        if page_num < 1 or page_num > len(images):
+            raise HTTPException(status_code=400, detail='Page number out of range')
+
+        img = images[page_num - 1]
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        buf.seek(0)
+        return StreamingResponse(buf, media_type='image/png')
+    except Exception as e:
+        print(f'Error rendering page {page_num}: {e}')
+        raise HTTPException(status_code=500, detail='Failed to render page')
