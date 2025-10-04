@@ -1,0 +1,34 @@
+Summary of changes made since the initial base repository
+
+Files added or modified:
+
+- .gitignore: Added to ignore venvs, node_modules, build artifacts and env files.
+- .gitattributes: Added text normalization and binary markers.
+- frontend/.env.local.example: Example env for NEXT_PUBLIC_API_BASE_URL.
+- backend/requirements-dev.txt: Minimal backend dev requirements (fastapi, uvicorn, python-multipart, Pillow, pdfminer.six, pytesseract, pdf2image).
+- backend/simple_app.py: Replaced the original modal-backed app with a lightweight FastAPI dev app. Key features:
+  - /models endpoint (list available mock models)
+  - /extract/{model_id} endpoint: performs extraction using pdfminer.six for born-digital PDFs; falls back to OCR using pdf2image+pytesseract when needed; returns structured JSON (markdown_output, elements, metrics) and supports ?download=true to download a .md file.
+  - /annotate/{model_id}: returns annotated PNG given elements payload (dev helper).
+  - /render/page/{page_num}: server-side render of a PDF page to PNG (fast preview thumbnails).
+- backend/annotate.py: Utility to draw bounding boxes over a blank canvas for UI testing.
+- frontend/app/components/PdfViewer.tsx: Updated PDF viewer to use local worker at /pdf.worker.min.js, added faster rendering mode (disable text/annotation layers by default), loading progress, and iframe fallback if pdf.js is slow.
+- frontend/public/pdf.worker.min.js: Small worker shim to try local node_modules copy or fallback to CDN.
+- frontend/app/components/MarkdownOutput.tsx: Added Copy and Download Markdown buttons; wired download flow to POST /extract/{model}?download=true.
+- frontend/app/page.tsx: Wired the frontend to pass file and model to MarkdownOutput.
+
+Other changes:
+- Installed Python packages in venv: pytesseract, pdf2image (note: requires Tesseract and Poppler binaries on the system).
+- Started uvicorn and Next dev servers locally during development.
+
+Notes and caveats:
+- The OCR pipeline uses pytesseract.image_to_data to return detailed paragraph bounding boxes; this relies on Tesseract and Poppler being installed on the host.
+- The markdown formatting now includes YAML front-matter with filename, model, time and counts. Tables are preserved in fenced code blocks; further improvement can translate detected tables into Markdown table syntax.
+- I removed `run_local.ps1` and the `.env.local` created during development to keep the repo cleaner. If you relied on `run_local.ps1`, let me know and I can restore a polished version.
+
+If you want, I can:
+- Wire the frontend to default to server-rendered PNG pages (via /render/page) for fast viewing and overlay the `elements` boxes.
+- Improve markdown table detection and conversion.
+- Add a background job queue for long OCR jobs.
+
+End of change log.

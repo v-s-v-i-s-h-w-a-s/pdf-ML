@@ -117,10 +117,36 @@ async def extract_pdf(model_id: str, file: UploadFile = File(...), download: boo
                         })
 
         if markdown_parts:
-            markdown = "# Extracted Text\n\n" + "".join(markdown_parts)
-            metrics = {"time_s": 0.05, "elements_count": len(elements), "word_count": total_words}
+            # Build cleaner Markdown from structured elements (grouped by page)
+            time_s = 0.05
+            yaml_meta = f"---\nfilename: '{file.filename}'\nmodel: '{model_id}'\ntime_s: {time_s}\nelements: {len(elements)}\nword_count: {total_words}\n---\n\n"
+
+            md_parts = []
+            # Group elements by page and sort top->bottom, left->right
+            by_page: Dict[int, List[Dict]] = {}
+            for el in elements:
+                by_page.setdefault(el['page'], []).append(el)
+
+            for p in sorted(by_page.keys()):
+                md_parts.append(f"## Page {p}\n\n")
+                items = sorted(by_page[p], key=lambda e: (e['bbox'][1], e['bbox'][0]))
+                for el in items:
+                    text = el.get('text', '').strip()
+                    if not text:
+                        continue
+                    if el.get('type') == 'title':
+                        md_parts.append('# ' + text + '\n\n')
+                    elif el.get('type') == 'header':
+                        md_parts.append('## ' + text + '\n\n')
+                    elif el.get('type') == 'table':
+                        # Preserve table-looking text in a fenced codeblock for now
+                        md_parts.append('```\n' + text + '\n```\n\n')
+                    else:
+                        md_parts.append(text + '\n\n')
+
+            markdown = yaml_meta + ''.join(md_parts).rstrip() + '\n'
+            metrics = {"time_s": time_s, "elements_count": len(elements), "word_count": total_words}
             if download:
-                # Return a streaming Markdown file
                 safe_name = (file.filename or model_id).replace(' ', '_')
                 md_bytes = markdown.encode('utf-8')
                 headers = {"Content-Disposition": f'attachment; filename="{safe_name}.md"'}
